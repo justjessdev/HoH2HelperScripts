@@ -1,5 +1,9 @@
 # HoH2HelperScripts
-Scripts designed to assist in extracting data from Heroes of Hammerwatch II game files and formatting it for use in the wiki.
+Scripts designed to assist in extracting data from Heroes of Hammerwatch II game files and formatting it for use in maintaining the game's wiki.
+
+Wiki: https://wiki.heroesofhammerwatch2.com/index.php/Main_Page
+
+Heroes of Hammerwatch II is developed by Crackshell: https://www.crackshell.dk/
 
 # Trinket Data Extractor
 
