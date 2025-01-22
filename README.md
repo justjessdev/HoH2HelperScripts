@@ -7,6 +7,8 @@ Heroes of Hammerwatch II is developed by Crackshell: https://www.crackshell.dk/
 
 # Trinket Data Extractor
 
+![gif of the trinket scripts working](https://github.com/justjessdev/HoH2HelperScripts/blob/main/images/trinket_data_extractor.gif)
+
 ## Description
 This script is designed to parse `.sval` files, which are structured data files, and generate human-readable CSV files, which can then also be used in the automatic generation of MediaWiki formatted tables.
 
