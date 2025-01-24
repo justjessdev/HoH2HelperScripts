@@ -5,7 +5,17 @@ import re
 
 # Configuration variables for easy tuning
 DESCRIPTION_WRAP_LIMIT = 40  # Max characters per line before wrapping
-CELL_PADDING = "10px"  # Padding for table cells
+CELL_PADDING = "10px"  # Padding for regular table cells
+ICON_PADDING = "15px"  # Padding for icon column
+ICON_SIZE = 32  # Size in pixels for icon images (default sprite size is 24px)
+INLINE_ICON_SIZE = 16  # Size in pixels for inline icons next to item names
+SET_ICON_SIZE = 24  # Size in pixels for icons displayed under set names
+MAIN_HEADER_FONT_SIZE = "16px"  # Font size for the main table header
+COLUMN_HEADER_FONT_SIZE = "15px"  # Font size for column headers
+NAME_FONT_SIZE = "14px"   # Font size for item names
+DESC_FONT_SIZE = "14px"   # Font size for descriptions
+CELL_FONT_SIZE = "14px"   # Font size for other cells
+SET_NAME_FONT_SIZE = "16px"  # Font size for set names in the sets table
 NO_ATTUNEMENT_STYLE_LIGHTNESS = 0.3  # Lightness adjustment for "No Attunement" text color
 
 # Dictionary for MediaWiki link terms
@@ -184,58 +194,294 @@ def split_description(description, row_style):
 
     return base_desc, attuned_desc
 
-# Load the data from the CSV file
-current_directory = os.path.dirname(os.path.abspath(__file__))
-file_path = os.path.join(current_directory, 'trinket_data.csv')
-try:
-    with open(file_path, 'r') as file:
-        reader = csv.DictReader(file)
-        data = [row for row in reader]
-except FileNotFoundError:
-    print(f"Error: The file 'trinket_data.csv' was not found in the current directory ({current_directory}).")
-    input("Press Enter to close the program...")
-    sys.exit(1)
+def process_raw_description(row):
+    """Convert raw description fields into formatted description"""
+    desc = row.get("desc", "")
+    attune_desc = row.get("attune-desc", "")
+    
+    description = ""
+    if desc:
+        description += "Base: " + desc.replace("\\n", "\n")
+    if attune_desc:
+        if description:
+            description += "\n\n"
+        description += "Attuned: " + attune_desc.replace("\\n", "\n")
+    return description
 
-# Group data by quality
-grouped_data = defaultdict(list)
-for row in data:
-    grouped_data[row['quality'].lower()].append(row)
+def filter_row_data(row):
+    """Filter and transform raw row data into wiki format"""
+    # Define the columns we want in the wiki output
+    wiki_columns = ["icon", "name", "description", "price", "quality", "Set Item", "Item Set Name"]
+    filtered_row = {}
+    
+    # Process description fields
+    filtered_row["description"] = process_raw_description(row)
+    
+    # Copy other desired fields
+    for col in wiki_columns:
+        if col != "description" and col in row:
+            filtered_row[col] = row[col] if row[col] is not None else ""
+            
+    return filtered_row
 
-# Generate a separate table for each quality
-for quality, items in grouped_data.items():
-    quality_title = f"List of {quality.capitalize()} Trinkets"
+def generate_wiki_tables(data):
+    # Group data by quality
+    grouped_data = defaultdict(list)
+    for row in data:
+        wiki_row = filter_row_data(row)
+        grouped_data[row['quality'].lower()].append(wiki_row)
 
-    table_output = f"{{| class=\"wikitable\" style=\"border-collapse:collapse;\"\n"
-    table_output += f"! colspan=\"7\" | {quality_title}\n"  # Merged header row
-    table_output += "|-\n"  # Header row separator
+    # Generate tables
+    for quality, items in grouped_data.items():
+        quality_title = f"List of {quality.capitalize()} Trinkets"
+        
+        # Start table with header
+        table_output = [
+            "{| class=\"wikitable\" style=\"border-collapse:collapse;\"",
+            f"! colspan=\"7\" style=\"font-size:{MAIN_HEADER_FONT_SIZE}; padding:8px;\" | {quality_title}",
+            "|-",
+            ""
+        ]
+        
+        # Add column headers
+        headers = ["Icon", "Name", "Base Description", "Attuned Description", "Price", "Set Item", "Item Set Name"]
+        header_cells = [f"! style=\"font-size:{COLUMN_HEADER_FONT_SIZE}; padding:5px;\" | '''{header.title()}'''" for header in headers]
+        table_output.append(" !! ".join(header_cells))
+        
+        # Add rows for each item
+        for index, row in enumerate(items):
+            table_output.extend([
+                "|-",
+                ""
+            ])
+            
+            row_style = get_row_style(quality, index)
+            name_color = name_colors.get(quality, "black")
+            base_desc, attuned_desc = split_description(row['description'], row_style)
+            set_item = "" if row.get('Set Item', '').lower() == 'false' else "✔"
+            
+            # Format the icon
+            icon = row.get('icon', '')
+            if icon:
+                icon = icon.replace("[[File:", f"[[File:")
+                icon = icon[:-2] + f"|{ICON_SIZE}px]]"
+            
+            # Add link to set name if it exists
+            set_name = row.get('Item Set Name', '')
+            if set_name:
+                set_name = f"[[#{set_name.replace(' ', '_').lower()}|{set_name}]]"
+            
+            # Format each cell with proper indentation
+            cells = [
+                f"| style=\"text-align:center; padding:{ICON_PADDING};\" | {icon}",
+                f"| style=\"text-align:center; background-color:{row_style}; color:{name_color}; padding:{CELL_PADDING}; font-size:{NAME_FONT_SIZE};\" | <span id=\"{row['name'].replace(' ', '_').lower()}\">{row['name']}</span>",
+                f"| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING}; font-size:{DESC_FONT_SIZE};\" | {base_desc}",
+                f"| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING}; font-size:{DESC_FONT_SIZE};\" | {attuned_desc}",
+                f"| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING}; font-size:{CELL_FONT_SIZE};\" | {row.get('price', '')}",
+                f"| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING}; font-size:{CELL_FONT_SIZE};\" | {set_item}",
+                f"| style=\"background-color:{row_style}; padding:{CELL_PADDING}; font-size:{CELL_FONT_SIZE};\" | {set_name}"
+            ]
+            table_output.extend(cells)
+            table_output.append("")
+        
+        # End the table
+        table_output.extend([
+            "|}",
+            ""
+        ])
+        
+        # Save each table to a separate file
+        table_file_path = os.path.join(os.path.dirname(__file__), f"{quality}_trinkets_table.txt")
+        with open(table_file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(table_output))
 
-    # Add column headers
-    headers = ["Icon", "Name", "Base Description", "Attuned Description", "Price", "Set Item", "Item Set Name"]
-    table_output += "! " + " !! ".join([f"'''{header.title()}'''" for header in headers]) + "\n"
+def load_trinket_data():
+    """Load the raw trinket data from CSV"""
+    current_directory = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(current_directory, 'trinket_data.csv')
+    sets_csv_path = os.path.join(current_directory, 'trinket_sets_data.csv')
+    
+    data = []
+    sets_data = []
+    
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            data = list(reader)
+    except FileNotFoundError:
+        print(f"Error: trinket_data.csv not found in {current_directory}")
+    except Exception as e:
+        print(f"Error reading trinket_data.csv: {e}")
+    
+    try:
+        with open(sets_csv_path, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            sets_data = list(reader)
+    except FileNotFoundError:
+        print(f"Error: trinket_sets_data.csv not found in {current_directory}")
+    except Exception as e:
+        print(f"Error reading trinket_sets_data.csv: {e}")
+    
+    return data, sets_data
 
-    # Add rows for each item
-    for index, row in enumerate(items):
-        table_output += "|-\n"  # Row separator
-        row_style = get_row_style(quality, index)
-        name_color = name_colors.get(quality, "black")
-        base_desc, attuned_desc = split_description(row['description'], row_style)
-        set_item = "" if row['Set Item'].lower() == 'false' else "✔"
-        table_output += (
-            f"| style=\"text-align:center; padding:{CELL_PADDING};\" | {row['icon']} "
-            f"|| style=\"text-align:center; background-color:{row_style}; color:{name_color}; padding:{CELL_PADDING};\" | <span id=\"{row['name'].replace(' ', '_').lower()}\">{row['name']}</span> "
-            f"|| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING};\" | {base_desc} "
-            f"|| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING};\" | {attuned_desc} "
-            f"|| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING};\" | {row['price']} "
-            f"|| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING};\" | {set_item} "
-            f"|| style=\"background-color:{row_style}; padding:{CELL_PADDING};\" | {row['Item Set Name']}\n"
+def format_set_items(set_items, trinket_data):
+    """Format set items with their quality colors and inline icons"""
+    # Create mappings of item names to their qualities and icons
+    item_data = {
+        item['name']: {
+            'quality': item['quality'].lower(),
+            'icon': item.get('icon', '')
+        } for item in trinket_data
+    }
+    
+    items = set_items.split('\n')
+    formatted_items = []
+    
+    for item in items:
+        item = item.strip()
+        if item:
+            data = item_data.get(item, {'quality': 'common', 'icon': ''})
+            quality = data['quality']
+            color = name_colors.get(quality, '#bababa')
+            
+            # Format the icon with size parameter
+            icon = data['icon']
+            if icon:
+                icon = icon.replace("[[File:", "[[File:")
+                icon = icon[:-2] + f"|{INLINE_ICON_SIZE}px]]"  # Insert size before closing brackets
+            
+            # Create link to the item in its quality table using the item's name as anchor
+            item_anchor = item.replace(' ', '_').lower()
+            formatted_items.append(
+                f"{icon} <span style=\"color:{color}; vertical-align:middle;\">[[#{item_anchor}|{item}]]</span>"
+            )
+    
+    return "<br>".join(formatted_items)
+
+def format_set_effects(set_effects):
+    """Format set effects as a sub-table"""
+    if not set_effects:
+        return ""
+    
+    effects = set_effects.split('\n\n')
+    if not effects:
+        return ""
+    
+    # Create rows for each effect without using a nested table
+    rows = []
+    for effect in effects:
+        if ':' not in effect:
+            continue
+            
+        num_items, description = effect.split(':', 1)
+        # Apply MediaWiki links to the description
+        linked_description = apply_mediawiki_links(description.strip())
+        
+        rows.append(
+            f"<div style=\"display:flex; width:100%; margin:2px 0;\">"
+            f"<div style=\"width:80px; text-align:right; font-weight:bold; padding-right:5px;\">{num_items} items:</div>"
+            f"<div style=\"flex:1; text-align:left; padding-left:5px;\">{linked_description}</div>"
+            f"</div>"
         )
+    
+    return "<div style=\"width:100%;\">" + "".join(rows) + "</div>"
 
+def get_set_icons(set_items, trinket_data, size=None):
+    """Get formatted icons for all items in a set"""
+    # Use SET_ICON_SIZE by default
+    if size is None:
+        size = SET_ICON_SIZE
+        
+    # Create mapping of item names to their icons
+    item_data = {item['name']: item.get('icon', '') for item in trinket_data}
+    
+    icons = []
+    items = set_items.split('\n')
+    for item in items:
+        item = item.strip()
+        if item and item in item_data:
+            icon = item_data[item]
+            if icon:
+                icon = icon.replace("[[File:", "[[File:")
+                icon = icon[:-2] + f"|{size}px]]"  # Insert size before closing brackets
+                icons.append(icon)
+    
+    return " ".join(icons) if icons else ""
+
+def generate_sets_table(sets_data, trinket_data):
+    """Generate a table for trinket sets"""
+    # Start table with header
+    table_output = [
+        "{| class=\"wikitable\" style=\"border-collapse:collapse;\"",
+        f"! colspan=\"4\" style=\"font-size:{MAIN_HEADER_FONT_SIZE}; padding:8px;\" | Trinket Sets",
+        "|-",
+        ""
+    ]
+    
+    # Add column headers
+    headers = ["Set Name", "Items in Set", "Set Items", "Set Effects"]
+    header_cells = [f"! style=\"font-size:{COLUMN_HEADER_FONT_SIZE}; padding:5px;\" | '''{header}'''" for header in headers]
+    table_output.append(" !! ".join(header_cells))
+    
+    # Add rows for each set
+    for index, row in enumerate(sets_data):
+        table_output.extend([
+            "|-",
+            ""
+        ])
+        
+        row_style = quality_styles['common'][index % 2]
+        
+        # Format set items with quality colors and inline icons
+        formatted_items = format_set_items(row.get('Set Items', ''), trinket_data)
+        
+        # Get set icons
+        set_icons = get_set_icons(row.get('Set Items', ''), trinket_data)
+        
+        # Format set name with icons underneath and add anchor
+        set_name = row.get('Item Set Name', '')
+        set_name_anchor = set_name.replace(' ', '_').lower()
+        set_name_cell = (
+            f"<span id=\"{set_name_anchor}\">{set_name}</span><br><br>"
+            f"{set_icons}"
+        )
+        
+        # Format set effects as sub-table
+        set_effects = format_set_effects(row.get('Set Effect', ''))
+        
+        # Format each cell with proper indentation
+        cells = [
+            f"| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING}; font-size:{SET_NAME_FONT_SIZE};\" | {set_name_cell}",
+            f"| style=\"text-align:center; background-color:{row_style}; padding:{CELL_PADDING}; font-size:{CELL_FONT_SIZE};\" | {row.get('Items in Set', '')}",
+            f"| style=\"background-color:{row_style}; padding:{CELL_PADDING}; font-size:{NAME_FONT_SIZE};\" | {formatted_items}",
+            f"| style=\"background-color:{row_style}; padding:{CELL_PADDING}; font-size:{DESC_FONT_SIZE};\" | {set_effects}"
+        ]
+        table_output.extend(cells)
+        table_output.append("")
+    
     # End the table
-    table_output += "|}\n"
-
-    # Save each table to a separate file
-    table_file_path = os.path.join(current_directory, f"{quality}_trinkets_table.txt")
+    table_output.extend([
+        "|}",
+        ""
+    ])
+    
+    # Save the sets table
+    table_file_path = os.path.join(os.path.dirname(__file__), "trinket_sets_table.txt")
     with open(table_file_path, 'w', encoding='utf-8') as f:
-        f.write(table_output)
+        f.write('\n'.join(table_output))
 
-    print(f"Table for {quality.capitalize()} saved to {table_file_path}")
+def main():
+    # Load the raw data
+    trinket_data, sets_data = load_trinket_data()
+    if not trinket_data:
+        print("No trinket data found. Please run trinket_data_extractor.py first.")
+        return
+
+    # Generate wiki tables
+    generate_wiki_tables(trinket_data)
+    if sets_data:
+        generate_sets_table(sets_data, trinket_data)
+    print("Wiki tables have been generated successfully.")
+
+if __name__ == "__main__":
+    main()

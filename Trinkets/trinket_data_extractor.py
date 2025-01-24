@@ -44,7 +44,16 @@ def parse_sval_file(file_path):
             tag_name = element.tag
             name_attr = element.get('name', None)
             text_content = element.text.strip() if element.text else None
-            if name_attr and not name_attr.isdigit():
+
+            # Handle icon data specially
+            if name_attr == "icon":
+                # Extract icon data using the same pattern as sprite_slicer.py
+                icon_pattern = r'<a name="icon"><s>(.*?)</s><i>\d+</i><vec4>(.*?)</vec4></a>'
+                icon_match = re.search(icon_pattern, ET.tostring(element, encoding='unicode'))
+                if icon_match:
+                    data['spritesheet'] = icon_match.group(1)
+                    data['coordinates'] = [int(x) for x in icon_match.group(2).split()]
+            elif name_attr and not name_attr.isdigit():
                 data[name_attr.lower()] = text_content.strip() if text_content else None
         if data:
             parsed_data.append(data)
@@ -134,58 +143,66 @@ def find_sval_files(directory):
     print(f"Found {len(sval_files)} .sval files")
     return sval_files
 
+def get_icon_path(item_id):
+    """Check if an icon exists for the given item ID and return its path"""
+    current_directory = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(current_directory, "SpritesheetAutoSlicer", "output_sprites", f"{item_id}.png")
+    if os.path.exists(icon_path):
+        return f"[[File:{item_id}.png]]"  # MediaWiki format for images
+    return ""
+
 def write_to_csv(data, output_file, set_rows, sets_data):
     print(f"Writing parsed data to {output_file}")
     if not data and not set_rows:
         print("No data to write.")
         return
 
-    preferred_order = ["icon", "name", "description", "price", "quality", "Set Item", "Item Set Name"]
+    # First pass: collect all possible keys from all items
     all_keys = set()
     for row in data:
         all_keys.update(row.keys())
-    # Remove unused or excluded columns
-    # ToDo: Move this to the Wiki Formatter so that the raw data from this script can be used for more general purposes
-    excluded_columns = {"id", "skill", "attune-modifier", "attune-modifiers", "conditionals", "modifier", "modifiers", "shown-icons", "desc", "attune-desc"}
-    remaining_keys = sorted(k for k in all_keys if k not in preferred_order and k not in excluded_columns)
-    column_order = preferred_order + remaining_keys
+    
+    # Add set-related keys and icon that might not be in the raw data
+    all_keys.add("Set Item")
+    all_keys.add("Item Set Name")
+    all_keys.add("icon")
+    all_keys.add("spritesheet")
+    all_keys.add("coordinates")
+    
+    # Convert to sorted list for consistent column order
+    column_order = sorted(all_keys)
 
     try:
         with open(output_file, 'w', newline='', encoding='utf-8') as file:
             writer = csv.DictWriter(file, fieldnames=column_order)
             writer.writeheader()
 
+            # Write each row, ensuring all columns are present
             for row in data:
-                # Combine "desc" and "attune-desc" into "description"
-                # ToDo: Move this to the Wiki Formatter so that the raw data from this script can be used for more general purposes
-                desc = row.pop("desc", None)
-                attune_desc = row.pop("attune-desc", None)
-                if desc or attune_desc:
-                    description = ""
-                    if desc:
-                        description += "Base: " + desc.replace("\\n", "\n")
-                    if attune_desc:
-                        if description:
-                            description += "\n\n"
-                        description += "Attuned: " + attune_desc.replace("\\n", "\n")
-                    row["description"] = description
-
-                # Preserve id for internal processing but exclude from output
-                # ToDo: Removing this exclusion breaks stuff because I am a silly goose, but will remove later so it's included in raw data
+                # Create a new dict with all possible keys initialized to None
+                full_row = {key: None for key in column_order}
+                
+                # Update with actual data from the row
+                full_row.update(row)
+                
+                # Add set information
                 item_id = row.get("id", "")
                 if item_id in sets_data:
                     print(f"Debug: Match found - Updating '{row.get('name', 'Unknown')}' with set data: {sets_data[item_id]}")
-                    row.update(sets_data[item_id])
+                    full_row.update(sets_data[item_id])
                 else:
                     print(f"Debug: No match - '{row.get('name', 'Unknown')}' is not part of any set.")
-                    row["Set Item"] = False
-                    row["Item Set Name"] = None
+                    full_row["Set Item"] = False
+                    full_row["Item Set Name"] = None
+                
+                # Convert coordinates to string if present
+                if full_row.get("coordinates"):
+                    full_row["coordinates"] = " ".join(str(x) for x in full_row["coordinates"])
+                
+                # Add icon path if available
+                full_row["icon"] = get_icon_path(item_id)
 
-                # Remove excluded columns
-                for col in excluded_columns:
-                    row.pop(col, None)
-
-                writer.writerow(row)
+                writer.writerow(full_row)
     except IOError as e:
         print(f"Error writing to file {output_file}: {e}")
 
@@ -220,14 +237,23 @@ def main():
         print("No .sval files found in the current directory.")
         return
 
-    all_data = []
+    # Create a dictionary to track processed items by ID to prevent duplicates
+    processed_items = {}
+    
     for sval_file in sval_files:
         if os.path.basename(sval_file) == "sets.sval":
-            continue  # Skip processing sets.sval directly so that the sets don't appear as "items" in the output data
+            continue  # Skip processing sets.sval directly
         print(f"Parsing {sval_file}...")
         file_data = parse_sval_file(sval_file)
         if file_data:
-            all_data.extend(file_data)
+            # Only add items we haven't seen before
+            for item in file_data:
+                item_id = item.get('id')
+                if item_id and item_id not in processed_items:
+                    processed_items[item_id] = item
+
+    # Convert dictionary back to list for writing
+    all_data = list(processed_items.values())
 
     if all_data or set_rows:
         write_to_csv(all_data, output_csv, set_rows, sets_data)
